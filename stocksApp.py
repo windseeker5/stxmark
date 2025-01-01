@@ -218,8 +218,82 @@ def get_symbols_from_db():
 
 
 
+
+def calculate_and_store_performance():
+    with sqlite3.connect(DB_NAME) as conn:
+        # Load all data from the stock_data table
+        query = f"""
+            SELECT *
+            FROM {TABLE_NAME}
+            ORDER BY Symbol, Date
+        """
+        df = pd.read_sql_query(query, conn)
+
+    # Ensure data is sorted by Symbol and Date
+    df['Date'] = pd.to_datetime(df['Date'])
+    df.sort_values(by=['Symbol', 'Date'], inplace=True)
+
+    # Calculate daily percentage change (Performance)
+    df['Performance'] = df.groupby('Symbol', group_keys=False)['Close'].pct_change(fill_method=None) * 100
+
+    # Fill NaN values in Performance with 0
+    df['Performance'] = df['Performance'].fillna(0)
+
+    # Calculate cdpp (Consecutive Days Performance > 2%)
+    def calculate_cdpp(group):
+        consecutive_days = 0
+        cdpp_list = []
+
+        for performance in group:
+            if performance > 2:  # Increment counter for Performance > 2%
+                consecutive_days += 1
+            else:
+                consecutive_days = 0  # Reset counter if Performance <= 2%
+            cdpp_list.append(consecutive_days)
+
+        return cdpp_list
+
+    # Apply cdpp calculation without including the grouping column
+    df['cdpp'] = df.groupby('Symbol', group_keys=False)['Performance'].apply(calculate_cdpp).explode().astype(int).values
+
+    # Save updated data back to the database
+    with sqlite3.connect(DB_NAME) as conn:
+        # Ensure the updated table includes the new columns
+        df.to_sql(TABLE_NAME, conn, if_exists="replace", index=False)
+        print("Performance and cdpp calculated and stored in stock_data.")
+
+
+
+
+
+
+def drop_tables():
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        try:
+            # Drop stock_data table if it exists
+            cursor.execute("DROP TABLE IF EXISTS stock_data")
+            # Drop symbols table if it exists
+            cursor.execute("DROP TABLE IF EXISTS symbols")
+            # Drop sp500 table if it exists
+            cursor.execute("DROP TABLE IF EXISTS sp500")
+            conn.commit()
+            print("Tables dropped successfully.")
+        except Exception as e:
+            print(f"Error dropping tables: {e}")
+
+
+
+
+
+
+
 # Main function to fetch and save stock data
 def main():
+    # Drop existing tables
+    drop_tables()
+
+    # Initialize the database
     init_database()
 
     # Fetch S&P 500 symbols and save to database
@@ -228,18 +302,25 @@ def main():
     # Fetch US symbols and save to database
     fetch_us_symbols()
 
-    # Uncomment the following for stock data fetching
+    # Fetch stock data
     end_date = datetime.today()
     start_date = end_date - timedelta(days=hdays)
-    
     symbols = get_symbols_from_db()
     print(f"Total symbols to process: {len(symbols)}")
     batches = [symbols[i:i + BATCH_SIZE] for i in range(0, len(symbols), BATCH_SIZE)]
-    
+
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(fetch_and_save_batch, batch, start_date, end_date) for batch in batches]
         for future in futures:
-             future.result()
+            future.result()
+
+    # Calculate performance and cdpp
+    calculate_and_store_performance()
+
+
+
+
+
 
 if __name__ == "__main__":
     main()
