@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Performance</title>
+</head>
+<body>
+    <h1>Top 25 Best Performing Stocks</h1>
+    <ul>
+        {% for stock in best %}
+            <li>{{ stock[0] }}: {{ stock[1] }}%</li>
+        {% endfor %}
+    </ul>
+
+    <h1>Top 25 Worst Performing Stocks</h1>
+    <ul>
+        {% for stock in worst %}
+            <li>{{ stock[0] }}: {{ stock[1] }}%</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
