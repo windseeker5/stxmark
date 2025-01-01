@@ -16,8 +16,7 @@ BATCH_SIZE = 100
 FINNHUB_API_KEY = "ctpgeohr01qqsrsaov10ctpgeohr01qqsrsaov1g"
 
 # Historic days to keep
-hdays = 5
-
+hdays = 10
 
 
 
@@ -29,7 +28,7 @@ db_lock = Lock()
 def init_database():
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
-        # Create stock_data table
+        # Create stock_data table with additional columns
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS stock_data (
                 Date TEXT,
@@ -39,7 +38,12 @@ def init_database():
                 Close REAL,
                 Adj_Close REAL,
                 Volume INTEGER,
-                Symbol TEXT
+                Symbol TEXT,
+                Performance REAL,
+                cdpp INTEGER,
+                Average_Daily_Return REAL,
+                Volatility REAL,
+                Recent_Performance REAL
             )
         ''')
         # Create symbols table
@@ -54,7 +58,7 @@ def init_database():
             CREATE TABLE IF NOT EXISTS sp500 (
                 symbol TEXT PRIMARY KEY,
                 yFinanceInvalid_ind INTEGER DEFAULT 0
-       
+           
             )
         ''')
         conn.commit()
@@ -85,7 +89,6 @@ def fetch_sp500_symbols():
         print(f"Saved {len(sp500_symbols)} S&P 500 symbols to the database.")
     except Exception as e:
         print(f"Error fetching S&P 500 symbols: {e}")
-
 
 
 
@@ -124,7 +127,6 @@ def fetch_us_symbols():
 
 
 
-
 # Save data to SQLite
 def save_to_sqlite(dataframe):
     if dataframe.empty:
@@ -143,7 +145,6 @@ def save_to_sqlite(dataframe):
 
 
 
-# Fetch and save data for a batch of symbols
 def fetch_and_save_batch(symbols, start_date, end_date):
     try:
         raw_data = yf.download(symbols, start=start_date, end=end_date, group_by="ticker", threads=True)
@@ -152,36 +153,55 @@ def fetch_and_save_batch(symbols, start_date, end_date):
             print(f"No data for batch: {symbols}")
             return
 
-        # Process each symbol's data independently
         for symbol in symbols:
             try:
                 symbol_data = raw_data[symbol].reset_index() if symbol in raw_data else pd.DataFrame()
 
                 if symbol_data.empty:
                     print(f"No data for symbol: {symbol}")
-                    # Mark as invalid in the database
                     with sqlite3.connect(DB_NAME) as conn:
                         cursor = conn.cursor()
                         cursor.execute("UPDATE symbols SET yFinanceInvalid_ind = 1 WHERE symbol = ?", (symbol,))
                         conn.commit()
                     continue
 
-                # Add Symbol column
                 symbol_data['Symbol'] = symbol
 
-                # Ensure Adj Close column is present
                 if "Adj Close" in symbol_data.columns:
                     symbol_data.rename(columns={"Adj Close": "Adj_Close"}, inplace=True)
                 if "Adj_Close" not in symbol_data.columns:
                     symbol_data["Adj_Close"] = symbol_data["Close"]
 
-                # Rename and filter columns
                 processed_data = symbol_data.rename(columns={"Date": "Date"})[
                     ["Date", "Open", "High", "Low", "Close", "Adj_Close", "Volume", "Symbol"]
                 ]
 
-                # Save valid data
-                save_to_sqlite(processed_data)
+                # Calculate additional metrics
+                processed_data['Performance'] = processed_data['Close'].pct_change(fill_method=None) * 100
+                processed_data['Performance'] = processed_data['Performance'].fillna(0)
+
+                cdpp_list = []
+                consecutive_days = 0
+                for performance in processed_data['Performance']:
+                    if performance > 2:
+                        consecutive_days += 1
+                    else:
+                        consecutive_days = 0
+                    cdpp_list.append(consecutive_days)
+                processed_data['cdpp'] = cdpp_list
+
+                window = 5
+                if len(processed_data) >= window:
+                    processed_data['Average_Daily_Return'] = processed_data['Performance'].rolling(window=window).mean()
+                    processed_data['Volatility'] = processed_data['Performance'].rolling(window=window).std()
+                    processed_data['Recent_Performance'] = processed_data['Performance'].rolling(window=window).mean()
+                else:
+                    processed_data['Average_Daily_Return'] = None
+                    processed_data['Volatility'] = None
+                    processed_data['Recent_Performance'] = None
+
+                if not processed_data.empty:
+                    save_to_sqlite(processed_data)
 
             except Exception as e:
                 print(f"Error processing data for symbol {symbol}: {e}")
@@ -191,13 +211,6 @@ def fetch_and_save_batch(symbols, start_date, end_date):
 
 
 
-
-
-# Fetch symbols from the database
-#def get_symbols_from_db():
-#    with sqlite3.connect(DB_NAME) as conn:
-#        query = "SELECT symbol FROM symbols WHERE yFinanceInvalid_ind = 0 LIMIT 1000"
-#        return pd.read_sql_query(query, conn)["symbol"].tolist()
 
 
 
@@ -277,11 +290,12 @@ def drop_tables():
             cursor.execute("DROP TABLE IF EXISTS symbols")
             # Drop sp500 table if it exists
             cursor.execute("DROP TABLE IF EXISTS sp500")
+            # Drop stock_model table if it exists
+            cursor.execute("DROP TABLE IF EXISTS stock_model")
             conn.commit()
             print("Tables dropped successfully.")
         except Exception as e:
             print(f"Error dropping tables: {e}")
-
 
 
 
@@ -316,7 +330,6 @@ def main():
 
     # Calculate performance and cdpp
     calculate_and_store_performance()
-
 
 
 
