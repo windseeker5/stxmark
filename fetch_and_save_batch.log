@@ -1,0 +1,41 @@
+2025-01-02 13:15:54,203 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:54,216 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:54,243 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:54,243 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:54,255 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:54,297 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,205 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,211 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,261 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,274 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,287 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,374 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 8
+2025-01-02 13:15:55,706 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,707 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,723 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,771 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:55,779 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:56,591 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:56,599 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:56,609 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:56,610 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:56,629 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:56,662 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:57,414 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:57,417 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:57,417 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:57,422 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:57,444 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 9
+2025-01-02 13:15:57,483 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 9
+2025-01-02 13:15:58,348 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:58,362 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:58,362 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:58,368 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:58,383 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:58,410 - WARNING - Connection pool is full, discarding connection: query2.finance.yahoo.com. Connection pool size: 10
+2025-01-02 13:15:59,440 - ERROR - 
+11 Failed downloads:
+2025-01-02 13:15:59,440 - ERROR - ['AAMI']: YFInvalidPeriodError("%ticker%: Period 'max' is invalid, must be one of ['1d', '5d']")
+2025-01-02 13:15:59,440 - ERROR - ['AATRL', 'AACT.U', 'AASLF', 'AAM.WS', 'AAM.U', 'AACT.WS', 'ABASF', 'AASCF']: YFTzMissingError('$%ticker%: possibly delisted; no timezone found')
+2025-01-02 13:15:59,440 - ERROR - ['ABBAF', 'AAGRW']: YFPricesMissingError('$%ticker%: possibly delisted; no price data found  (1d 2024-12-03 13:15:53.854937 -> 2025-01-02 13:15:53.854937)')
+2025-01-02 13:16:02,083 - ERROR - Error fetching batch ['A', 'AA', 'AAA', 'AAAU', 'AABB', 'AABKF', 'AABVF', 'AACAF', 'AACAY', 'AACG', 'AACS', 'AACT', 'AACT.U', 'AACT.WS', 'AACTF', 'AADI', 'AADR', 'AAFRF', 'AAGC', 'AAGFF', 'AAGH', 'AAGIY', 'AAGR', 'AAGRW', 'AAGRY', 'AAHIF', 'AAIGF', 'AAIIQ', 'AAIRF', 'AAL', 'AALBF', 'AAM', 'AAM.U', 'AAM.WS', 'AAMAF', 'AAMCF', 'AAME', 'AAMI', 'AAMMF', 'AAMTF', 'AANNF', 'AAOI', 'AAON', 'AAP', 'AAPB', 'AAPD', 'AAPI', 'AAPJ', 'AAPL', 'AAPR', 'AAPT', 'AAPU', 'AAPX', 'AAPY', 'AAQL', 'AARTY', 'AASCF', 'AASLF', 'AASP', 'AASZF', 'AAT', 'AATC', 'AATGF', 'AATRL', 'AATV', 'AAUAF', 'AAUCF', 'AAUGF', 'AAUKF', 'AAVMY', 'AAVVF', 'AAVXF', 'AAWH', 'AAXJ', 'AAXT', 'AAYYY', 'AB', 'ABAKF', 'ABANF', 'ABASF', 'ABAT', 'ABBAF', 'ABBB', 'ABBNY', 'ABBRF', 'ABBV', 'ABBY', 'ABCB', 'ABCCF', 'ABCE', 'ABCFF', 'ABCGF', 'ABCL', 'ABCP', 'ABCS', 'ABCZF', 'ABDBY', 'ABDDF', 'ABDXF', 'ABEO']: name 'time' is not defined
