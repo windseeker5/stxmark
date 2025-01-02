@@ -16,7 +16,7 @@ BATCH_SIZE = 100
 FINNHUB_API_KEY = "ctpgeohr01qqsrsaov10ctpgeohr01qqsrsaov1g"
 
 # Historic days to keep
-hdays = 10
+hdays = 30
 
 
 
@@ -43,7 +43,13 @@ def init_database():
                 cdpp INTEGER,
                 Average_Daily_Return REAL,
                 Volatility REAL,
-                Recent_Performance REAL
+                Recent_Performance REAL,
+                MA_10 REAL,
+                MA_20 REAL,
+                MA_50 REAL,
+                RSI REAL,
+                Bollinger_Upper REAL,
+                Bollinger_Lower REAL
             )
         ''')
         # Create symbols table
@@ -58,10 +64,10 @@ def init_database():
             CREATE TABLE IF NOT EXISTS sp500 (
                 symbol TEXT PRIMARY KEY,
                 yFinanceInvalid_ind INTEGER DEFAULT 0
-           
             )
         ''')
         conn.commit()
+
 
 
 
@@ -145,7 +151,36 @@ def save_to_sqlite(dataframe):
 
 
 
+
+# Technical Indicators Function
+def calculate_technical_indicators(df):
+    """Calculate Moving Averages, RSI, and Bollinger Bands."""
+    window = 14  # Standard window for RSI and Bollinger Bands
+
+    # Moving Averages
+    df['MA_10'] = df['Close'].rolling(window=10).mean()
+    df['MA_20'] = df['Close'].rolling(window=20).mean()
+    df['MA_50'] = df['Close'].rolling(window=50).mean()
+
+    # RSI Calculation
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+
+    # Bollinger Bands
+    rolling_mean = df['Close'].rolling(window=window).mean()
+    rolling_std = df['Close'].rolling(window=window).std()
+    df['Bollinger_Upper'] = rolling_mean + (2 * rolling_std)
+    df['Bollinger_Lower'] = rolling_mean - (2 * rolling_std)
+
+    return df
+
+
+# Updated fetch_and_save_batch
 def fetch_and_save_batch(symbols, start_date, end_date):
+    """Fetch and process stock data."""
     try:
         raw_data = yf.download(symbols, start=start_date, end=end_date, group_by="ticker", threads=True)
 
@@ -180,26 +215,10 @@ def fetch_and_save_batch(symbols, start_date, end_date):
                 processed_data['Performance'] = processed_data['Close'].pct_change(fill_method=None) * 100
                 processed_data['Performance'] = processed_data['Performance'].fillna(0)
 
-                cdpp_list = []
-                consecutive_days = 0
-                for performance in processed_data['Performance']:
-                    if performance > 2:
-                        consecutive_days += 1
-                    else:
-                        consecutive_days = 0
-                    cdpp_list.append(consecutive_days)
-                processed_data['cdpp'] = cdpp_list
+                # Add technical indicators
+                processed_data = calculate_technical_indicators(processed_data)
 
-                window = 5
-                if len(processed_data) >= window:
-                    processed_data['Average_Daily_Return'] = processed_data['Performance'].rolling(window=window).mean()
-                    processed_data['Volatility'] = processed_data['Performance'].rolling(window=window).std()
-                    processed_data['Recent_Performance'] = processed_data['Performance'].rolling(window=window).mean()
-                else:
-                    processed_data['Average_Daily_Return'] = None
-                    processed_data['Volatility'] = None
-                    processed_data['Recent_Performance'] = None
-
+                # Save to database
                 if not processed_data.empty:
                     save_to_sqlite(processed_data)
 
@@ -209,24 +228,6 @@ def fetch_and_save_batch(symbols, start_date, end_date):
     except Exception as e:
         print(f"Error fetching batch {symbols}: {e}")
 
-
-
-
-
-
-# Fetch symbols from the database
-def get_symbols_from_db():
-    with sqlite3.connect(DB_NAME) as conn:
-        query = """
-            SELECT DISTINCT symbol
-            FROM (
-                   SELECT symbol FROM sp500 WHERE yFinanceInvalid_ind = 0
-                     UNION
-                   SELECT symbol FROM symbols WHERE yFinanceInvalid_ind = 0
-            ) AS combined
-            LIMIT 1000
-        """
-        return pd.read_sql_query(query, conn)["symbol"].tolist()
 
 
 
@@ -266,14 +267,47 @@ def calculate_and_store_performance():
 
         return cdpp_list
 
-    # Apply cdpp calculation without including the grouping column
+    # Apply cdpp calculation
     df['cdpp'] = df.groupby('Symbol', group_keys=False)['Performance'].apply(calculate_cdpp).explode().astype(int).values
+
+    # Calculate Average Daily Return, Volatility, and Recent Performance
+    window = 5  # Rolling window size for these metrics
+    df['Average_Daily_Return'] = df.groupby('Symbol')['Performance'].rolling(window=window).mean().reset_index(0, drop=True)
+    df['Volatility'] = df.groupby('Symbol')['Performance'].rolling(window=window).std().reset_index(0, drop=True)
+    df['Recent_Performance'] = df.groupby('Symbol')['Performance'].rolling(window=window).mean().reset_index(0, drop=True)
+
+    # Add technical indicators (Moving Averages, RSI, Bollinger Bands)
+    df = calculate_technical_indicators(df)
 
     # Save updated data back to the database
     with sqlite3.connect(DB_NAME) as conn:
-        # Ensure the updated table includes the new columns
         df.to_sql(TABLE_NAME, conn, if_exists="replace", index=False)
-        print("Performance and cdpp calculated and stored in stock_data.")
+        print("Performance, cdpp, rolling metrics, and technical indicators calculated and stored in stock_data.")
+
+
+
+
+
+
+
+# Fetch symbols from the database
+def get_symbols_from_db():
+    with sqlite3.connect(DB_NAME) as conn:
+        query = """
+            SELECT DISTINCT symbol
+            FROM (
+                   SELECT symbol FROM sp500 WHERE yFinanceInvalid_ind = 0
+                     UNION
+                   SELECT symbol FROM symbols WHERE yFinanceInvalid_ind = 0
+            ) AS combined
+            LIMIT 1000
+        """
+        return pd.read_sql_query(query, conn)["symbol"].tolist()
+
+
+
+
+
 
 
 
