@@ -16,7 +16,7 @@ BATCH_SIZE = 100
 FINNHUB_API_KEY = "ctpgeohr01qqsrsaov10ctpgeohr01qqsrsaov1g"
 
 # Historic days to keep
-hdays = 30
+hdays = 20
 
 
 
@@ -363,8 +363,6 @@ def main():
 
     # Calculate performance and cdpp
     calculate_and_store_performance()
-
-
 
 
 
