@@ -7,10 +7,11 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 import logging
 import urllib3
+import time  # Import time for delays
 
-import urllib3
+# Configure connection pool
 urllib3.util.connection.HAS_IPV6 = False
-pool_manager = urllib3.PoolManager(maxsize=50)  # Increase pool size to 50
+pool_manager = urllib3.PoolManager(maxsize=50)  # Increase pool size
 
 
 
@@ -47,7 +48,7 @@ def init_database():
                 High REAL,
                 Low REAL,
                 Close REAL,
-                Adj_Close REAL,
+                Adj_Close REAL,  -- Ensure this column exists
                 Volume INTEGER,
                 Symbol TEXT,
                 Performance REAL,
@@ -63,7 +64,6 @@ def init_database():
                 Bollinger_Lower REAL
             )
         ''')
-
         # Create symbols table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS symbols (
@@ -144,21 +144,13 @@ def fetch_us_symbols():
 
 
 
-
-# Save data to SQLite
-def save_to_sqlite(dataframe):
-    if dataframe.empty:
-        print("No data to save.")
-        return
-
-    with db_lock:
-        with sqlite3.connect(DB_NAME) as conn:
-            try:
-                dataframe.to_sql(TABLE_NAME, conn, if_exists="append", index=False)
-                print(f"Saved {len(dataframe)} rows to the database.")
-            except Exception as e:
-                print(f"Error saving data: {e}")
-
+def save_to_sqlite(data):
+    with sqlite3.connect(DB_NAME) as conn:
+        try:
+            data.to_sql(TABLE_NAME, conn, if_exists="append", index=False)
+            logging.info(f"Saved {len(data)} rows to the database.")
+        except Exception as e:
+            logging.error(f"Failed to save data to database. Error: {e}\nData:\n{data.head()}")
 
 
 
@@ -178,31 +170,28 @@ def mark_symbol_as_invalid(symbol):
 
 
 def calculate_technical_indicators(df):
-    """Calculate shorter Moving Averages, RSI, and Bollinger Bands."""
-    if len(df) < 5:  # Ensure enough data for the smallest moving average
+    if len(df) < 5:
         logging.warning(f"Insufficient data for technical indicators: {len(df)} rows available")
         return df
 
-    df = df.copy()  # Avoid modifying the original DataFrame
+    df = df.copy()
+    df = df.dropna(subset=['Close'])
 
-    # Shorter Moving Averages
-    df.loc[:, 'MA_5'] = df['Close'].rolling(window=5).mean()
-    df.loc[:, 'MA_10'] = df['Close'].rolling(window=10).mean()
-    df.loc[:, 'MA_15'] = df['Close'].rolling(window=15).mean()
+    df['MA_5'] = df['Close'].rolling(window=5).mean()
+    df['MA_10'] = df['Close'].rolling(window=10).mean()
+    df['MA_15'] = df['Close'].rolling(window=15).mean()
 
-    # RSI Calculation
     delta = df['Close'].diff()
     gain = delta.where(delta > 0, 0).rolling(window=14).mean()
     loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
     rs = gain / loss
-    df.loc[:, 'RSI'] = 100 - (100 / (1 + rs))
+    df['RSI'] = 100 - (100 / (1 + rs))
 
-    # Bollinger Bands with dynamic window size
-    max_window = min(len(df), 14)  # Use 14 if enough data, otherwise adapt to available rows
+    max_window = min(len(df), 14)
     rolling_mean = df['Close'].rolling(window=max_window).mean()
     rolling_std = df['Close'].rolling(window=max_window).std()
-    df.loc[:, 'Bollinger_Upper'] = rolling_mean + (2 * rolling_std)
-    df.loc[:, 'Bollinger_Lower'] = rolling_mean - (2 * rolling_std)
+    df['Bollinger_Upper'] = rolling_mean + (2 * rolling_std)
+    df['Bollinger_Lower'] = rolling_mean - (2 * rolling_std)
 
     return df
 
@@ -215,6 +204,7 @@ def calculate_technical_indicators(df):
 
 
 
+"""
 # Setup logging to only log warnings and errors
 logging.basicConfig(
     filename="fetch_and_save_batch.log",
@@ -222,97 +212,77 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     filemode="w"
 )
+"""
+
+logging.basicConfig(
+    filename="fetch_and_save_batch.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    filemode="w"
+)
 
 
 
 
-def fetch_and_save_batch(symbols, start_date, end_date, threads=True, max_retries=3):
-    """Fetch and process stock data with retry logic and enhanced saving."""
-    logging.info(f"Processing batch with {len(symbols)} symbols: {symbols}")
 
-    try:
-        # Retry logic for yfinance download
-        raw_data = None
-        for attempt in range(max_retries):
+
+
+
+
+def fetch_and_save_batch(symbols, start_date, end_date, max_retries=3):
+    logging.info(f"Processing batch of {len(symbols)} symbols...")
+    rows_saved = 0
+
+    for symbol in symbols:
+        attempt = 0
+        success = False
+
+        while attempt < max_retries and not success:
             try:
-                raw_data = yf.download(
-                    symbols,
+                logging.info(f"Fetching data for symbol: {symbol} (Attempt {attempt + 1})")
+                symbol_data = yf.download(
+                    symbol,
                     start=start_date,
                     end=end_date,
                     group_by="ticker",
-                    threads=threads
-                )
-                if not raw_data.empty:
-                    break  # Exit retry loop if successful
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    sleep_time = 2**attempt  # Exponential backoff
-                    logging.warning(f"Retrying batch due to error: {e}. Retry in {sleep_time} seconds.")
-                    time.sleep(sleep_time)
-                else:
-                    logging.error(f"Failed to fetch batch after {max_retries} retries: {symbols}")
-                    return
-
-        # Check if raw_data is valid
-        if raw_data is None or raw_data.empty:
-            logging.warning(f"No data fetched for batch: {symbols}")
-            return
-
-        # Process each symbol in the batch
-        for symbol in symbols:
-            try:
-                # Extract symbol-specific data
-                symbol_data = (
-                    raw_data[symbol].reset_index() if symbol in raw_data.columns.get_level_values(0) else pd.DataFrame()
+                    threads=False
                 )
 
-                # Check if data for the symbol exists
+                # Log the raw fetched data
+                logging.info(f"Raw data fetched for {symbol}:\n{symbol_data.head()}")
+
+                if symbol_data.empty or "Close" not in symbol_data.columns:
+                    logging.warning(f"No valid data for symbol: {symbol}")
+                    break
+
+                # Process and save data
+                symbol_data.reset_index(inplace=True)
+                symbol_data["Symbol"] = symbol
+                symbol_data.rename(columns={"Adj Close": "Adj_Close"}, inplace=True, errors='ignore')
+                symbol_data["Adj_Close"] = symbol_data.get("Adj_Close", symbol_data["Close"])
+
+                # Calculate technical indicators
+                symbol_data = calculate_technical_indicators(symbol_data)
                 if symbol_data.empty:
-                    logging.warning(f"No data found for symbol: {symbol}")
-                    mark_symbol_as_invalid(symbol)  # Mark the symbol as invalid
-                    continue
+                    logging.warning(f"No valid processed data for symbol: {symbol}. Skipping.")
+                    break
 
-                # Add symbol column
-                symbol_data['Symbol'] = symbol
-
-                # Rename columns to match database schema
-                if "Adj Close" in symbol_data.columns:
-                    symbol_data.rename(columns={"Adj Close": "Adj_Close"}, inplace=True)
-                if "Adj_Close" not in symbol_data.columns:
-                    symbol_data["Adj_Close"] = symbol_data["Close"]
-
-                # Replace the creation of processed_data with:
-                processed_data = symbol_data[
-                    ["Date", "Open", "High", "Low", "Close", "Adj_Close", "Volume", "Symbol"]
-                ].copy()
-
-                # Safely modify processed_data
-                processed_data.loc[:, 'Performance'] = processed_data['Close'].pct_change(fill_method=None) * 100
-                processed_data.loc[:, 'Performance'] = processed_data['Performance'].fillna(0)
-
-                # Add technical indicators
-                processed_data = calculate_technical_indicators(processed_data)
-
-                # Debug log processed data
-                if not processed_data.empty:
-                    logging.debug(f"Processed data for {symbol}: {processed_data}")
-
-                # Save to the database
-                if not processed_data.empty:
-                    save_to_sqlite(processed_data)
-                    logging.info(f"Successfully saved data for {symbol}")
-                else:
-                    logging.warning(f"No valid data to save for symbol: {symbol}")
+                # Save to database
+                save_to_sqlite(symbol_data)
+                rows_saved += len(symbol_data)
+                logging.info(f"Saved {len(symbol_data)} rows for symbol: {symbol}")
+                success = True
 
             except Exception as e:
-                logging.error(f"Error processing symbol {symbol}: {e}")
-                mark_symbol_as_invalid(symbol)  # Mark the symbol as invalid on error
+                attempt += 1
+                logging.error(f"Error fetching data for symbol: {symbol}. Error: {e}")
 
-        # Add delay between batch requests
-        time.sleep(1)  # Add a delay of 1 second between batches
+        if not success:
+            logging.warning(f"Failed to fetch data for symbol: {symbol} after {max_retries} attempts.")
+            mark_symbol_as_invalid(symbol)
 
-    except Exception as e:
-        logging.error(f"Error fetching batch {symbols}: {e}")
+    logging.info(f"Batch processed: {rows_saved} rows saved.")
+    return rows_saved
 
 
 
@@ -321,54 +291,87 @@ def fetch_and_save_batch(symbols, start_date, end_date, threads=True, max_retrie
 
 def calculate_and_store_performance():
     with sqlite3.connect(DB_NAME) as conn:
-        # Load all data from the stock_data table
-        query = f"""
-            SELECT *
-            FROM {TABLE_NAME}
-            ORDER BY Symbol, Date
-        """
-        df = pd.read_sql_query(query, conn)
+        df = pd.read_sql_query(f"SELECT * FROM {TABLE_NAME}", conn)
+        if df.empty:
+            logging.warning("No data found in the database. Skipping performance calculation.")
+            return
 
-    # Ensure data is sorted by Symbol and Date
-    df['Date'] = pd.to_datetime(df['Date'])
+    # Ensure proper date parsing and sorting
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
     df.sort_values(by=['Symbol', 'Date'], inplace=True)
 
-    # Calculate daily percentage change (Performance)
-    df['Performance'] = df.groupby('Symbol', group_keys=False)['Close'].pct_change(fill_method=None) * 100
+    # Validate critical columns
+    if 'Close' not in df.columns:
+        logging.error("Column 'Close' is missing from the data. Skipping performance calculation.")
+        return
 
-    # Fill NaN values in Performance with 0
-    df['Performance'] = df['Performance'].fillna(0)
+    # Calculate daily percentage change
+    try:
+        df['Performance'] = (
+            df.groupby('Symbol')['Close']
+            .transform(lambda x: x.pct_change() * 100)
+            .fillna(0)
+        )
+        df['Performance'] = pd.to_numeric(df['Performance'], errors='coerce').fillna(0)
+    except Exception as e:
+        logging.error(f"Error calculating Performance: {e}")
+        return
 
-    # Calculate cdpp (Consecutive Days Performance > 2%)
-    def calculate_cdpp(group):
-        consecutive_days = 0
-        cdpp_list = []
+    # Calculate Consecutive Days Performance > 2% (cdpp)
+    try:
+        def calculate_cdpp(group):
+            consecutive_days = 0
+            cdpp_list = []
+            for performance in group:
+                if performance > 2:
+                    consecutive_days += 1
+                else:
+                    consecutive_days = 0
+                cdpp_list.append(consecutive_days)
+            return cdpp_list
 
-        for performance in group:
-            if performance > 2:  # Increment counter for Performance > 2%
-                consecutive_days += 1
-            else:
-                consecutive_days = 0  # Reset counter if Performance <= 2%
-            cdpp_list.append(consecutive_days)
+        df['cdpp'] = df.groupby('Symbol')['Performance'].transform(calculate_cdpp)
+    except Exception as e:
+        logging.error(f"Error calculating cdpp: {e}")
+        return
 
-        return cdpp_list
+    # Calculate rolling metrics
+    try:
+        window = 5
+        df['Average_Daily_Return'] = (
+            df.groupby('Symbol')['Performance']
+            .rolling(window=window)
+            .mean()
+            .reset_index(0, drop=True)
+        )
+        df['Volatility'] = (
+            df.groupby('Symbol')['Performance']
+            .rolling(window=window)
+            .std()
+            .reset_index(0, drop=True)
+        )
+    except Exception as e:
+        logging.error(f"Error calculating rolling metrics: {e}")
+        return
 
-    # Apply cdpp calculation
-    df['cdpp'] = df.groupby('Symbol', group_keys=False)['Performance'].apply(calculate_cdpp).explode().astype(int).values
-
-    # Calculate Average Daily Return, Volatility, and Recent Performance
-    window = 5  # Rolling window size for these metrics
-    df['Average_Daily_Return'] = df.groupby('Symbol')['Performance'].rolling(window=window).mean().reset_index(0, drop=True)
-    df['Volatility'] = df.groupby('Symbol')['Performance'].rolling(window=window).std().reset_index(0, drop=True)
-    df['Recent_Performance'] = df.groupby('Symbol')['Performance'].rolling(window=window).mean().reset_index(0, drop=True)
-
-    # Add technical indicators (Moving Averages, RSI, Bollinger Bands)
-    df = calculate_technical_indicators(df)
+    # Add technical indicators
+    try:
+        df = calculate_technical_indicators(df)
+    except Exception as e:
+        logging.error(f"Error adding technical indicators: {e}")
+        return
 
     # Save updated data back to the database
-    with sqlite3.connect(DB_NAME) as conn:
-        df.to_sql(TABLE_NAME, conn, if_exists="replace", index=False)
-        print("Performance, cdpp, rolling metrics, and technical indicators calculated and stored in stock_data.")
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            df.to_sql(TABLE_NAME, conn, if_exists="replace", index=False)
+            logging.info(
+                "Performance, cdpp, rolling metrics, and technical indicators calculated and stored in stock_data."
+            )
+    except Exception as e:
+        logging.error(f"Error saving updated data to the database: {e}")
+        return
+
 
 
 
@@ -386,8 +389,6 @@ def get_symbols_from_db():
                      UNION
                    SELECT symbol FROM symbols WHERE yFinanceInvalid_ind = 0
             ) AS combined
-
-            LIMIT 100
         """
         return pd.read_sql_query(query, conn)["symbol"].tolist()
 
@@ -421,8 +422,6 @@ def drop_tables():
 
 
 
-
-
 # Main function to fetch and save stock data
 def main():
     # Drop existing tables
@@ -437,21 +436,30 @@ def main():
     # Fetch US symbols and save to database
     fetch_us_symbols()
 
-    # Fetch stock data
+    # Define start and end dates
     end_date = datetime.today()
     start_date = end_date - timedelta(days=hdays)
+
+    # Fetch symbols from the database and limit for testing
     symbols = get_symbols_from_db()
+    symbols = symbols[:1000]
     print(f"Total symbols to process: {len(symbols)}")
+
+    # Batch symbols
     batches = [symbols[i:i + BATCH_SIZE] for i in range(0, len(symbols), BATCH_SIZE)]
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(fetch_and_save_batch, batch, start_date, end_date) for batch in batches]
-        for future in futures:
-            future.result()
+    # Process each batch sequentially with retries
+    total_rows_saved = 0
+    for batch in batches:
+        rows_saved = fetch_and_save_batch(batch, start_date, end_date)
+        total_rows_saved += rows_saved
+        logging.info(f"Batch completed: {rows_saved} rows saved.")
+
+    # Log final results
+    logging.info(f"Total rows saved to the database: {total_rows_saved}")
 
     # Calculate performance and cdpp
     calculate_and_store_performance()
-
 
 
 if __name__ == "__main__":
