@@ -3,24 +3,48 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 import time
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 
 
 
 # Fetch stock data from Yahoo Finance
-def fetch_yfinance_data(symbols_list, batch_size=100):
+def fetch_yfinance_data(symbols_list, batch_size=100, max_retries=3):
     end_date = datetime.now()
     start_date = end_date - timedelta(days=30)
     
     data = {}
+    failed_symbols = []
+    
     for i in range(0, len(symbols_list), batch_size):
         batch_symbols = symbols_list[i:i + batch_size]
-        tickers = yf.download(batch_symbols, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'))
-        for symbol in batch_symbols:
-            data[symbol] = tickers.xs(symbol, level=1, axis=1)
+        retries = 0
+        success = False
         
-        # Sleep for 1 second to avoid hitting API rate limits
-        time.sleep(2)
+        while retries < max_retries and not success:
+            try:
+                tickers = yf.download(batch_symbols, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'))
+                for symbol in batch_symbols:
+                    if symbol in tickers.columns.levels[1]:
+                        data[symbol] = tickers.xs(symbol, level=1, axis=1)
+                    else:
+                        failed_symbols.append(symbol)
+                success = True
+            except Exception as e:
+                logging.error(f"Error fetching data for batch {batch_symbols}: {e}")
+                retries += 1
+                time.sleep(2)  # Sleep before retrying
+        
+        # Sleep for 5 seconds to avoid hitting API rate limits
+        time.sleep(5)
+    
+    if not data:
+        logging.warning("No data fetched.")
+        return pd.DataFrame()
     
     df = pd.concat(data, axis=1)
     
@@ -28,7 +52,11 @@ def fetch_yfinance_data(symbols_list, batch_size=100):
     df = df.stack(level=0, future_stack=True).reset_index()
     df.columns = ['Date', 'Ticker'] + list(df.columns[2:])
     
+    if failed_symbols:
+        logging.warning(f"Failed to fetch data for the following symbols: {failed_symbols}")
+    
     return df
+
 
 
 
@@ -59,6 +87,7 @@ def fetch_us_symbols(api_key):
     except requests.RequestException as e:
         print(f"Error fetching US symbols from Finnhub: {e}")
         return pd.DataFrame()
+
 
 
 
