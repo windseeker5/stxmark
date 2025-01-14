@@ -21,7 +21,7 @@ if __name__ == "__main__":
     symbols_df = fetch_us_symbols(FINNHUB_API_KEY)
     
     # Convert the DataFrame to a list of 10 tickers
-    symbols_list = symbols_df['Symbol'].head(1000).tolist()
+    symbols_list = symbols_df['Symbol'].head(100).tolist()
     print(symbols_list)
 
     # Example symbols list of 5 tickers

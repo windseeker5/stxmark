@@ -20,7 +20,7 @@ def fetch_yfinance_data(symbols_list, batch_size=100):
             data[symbol] = tickers.xs(symbol, level=1, axis=1)
         
         # Sleep for 1 second to avoid hitting API rate limits
-        #time.sleep(1)
+        time.sleep(2)
     
     df = pd.concat(data, axis=1)
     
