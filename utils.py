@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Fetch stock data from Yahoo Finance
 def fetch_yfinance_data(symbols_list, batch_size=100, max_retries=3):
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=30)
+    start_date = end_date - timedelta(days=50)
     
     data = {}
     failed_symbols = []
