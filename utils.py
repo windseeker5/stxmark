@@ -9,11 +9,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-
-
-
-# Fetch stock data from Yahoo Finance
-def fetch_yfinance_data(symbols_list, batch_size=100, max_retries=3):
+def fetch_yfinance_data(symbols_list, batch_size=500, max_retries=3):
     end_date = datetime.now()
     start_date = end_date - timedelta(days=50)
     
@@ -37,10 +33,60 @@ def fetch_yfinance_data(symbols_list, batch_size=100, max_retries=3):
             except Exception as e:
                 logging.error(f"Error fetching data for batch {batch_symbols}: {e}")
                 retries += 1
-                time.sleep(2)  # Sleep before retrying
+                time.sleep(5)  # Sleep before retrying
+        
+        # Sleep for 10 seconds to avoid hitting API rate limits
+        time.sleep(10)
+    
+    if not data:
+        logging.warning("No data fetched.")
+        return pd.DataFrame()
+    
+    # Concatenate all dataframes
+    df = pd.concat(data.values(), keys=data.keys(), axis=1)
+    
+    # Flatten the multi-index DataFrame
+    df = df.stack(level=0).reset_index()
+    df.columns = ['Date', 'Ticker'] + list(df.columns[2:])
+    
+    if failed_symbols:
+        logging.warning(f"Failed to fetch data for the following symbols: {failed_symbols}")
+    
+    return df
+
+
+
+
+
+# Fetch stock data from Yahoo Finance
+def Old_fetch_yfinance_data(symbols_list, batch_size=100, max_retries=1):
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=50)
+    
+    data = {}
+    failed_symbols = []
+    
+    for i in range(0, len(symbols_list), batch_size):
+        batch_symbols = symbols_list[i:i + batch_size]
+        retries = 0
+        success = False
+        
+        while retries < max_retries and not success:
+            try:
+                tickers = yf.download(batch_symbols, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'))
+                for symbol in batch_symbols:
+                    if symbol in tickers.columns.levels[1]:
+                        data[symbol] = tickers.xs(symbol, level=1, axis=1)
+                    else:
+                        failed_symbols.append(symbol)
+                success = True
+            except Exception as e:
+                logging.error(f"Error fetching data for batch {batch_symbols}: {e}")
+                retries += 1
+                time.sleep(1)  # Sleep before retrying
         
         # Sleep for 5 seconds to avoid hitting API rate limits
-        time.sleep(5)
+        time.sleep(2)
     
     if not data:
         logging.warning("No data fetched.")

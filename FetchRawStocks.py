@@ -6,7 +6,7 @@ import os, sys
 
 # Constants
 db_name = "stocks.db"
-default_batch_size = 100  # Optimize for large runs
+#default_batch_size = 100  # Optimize for large runs
 
 FINNHUB_API_KEY = "ctpgeohr01qqsrsaov10ctpgeohr01qqsrsaov1g"
 
@@ -112,13 +112,13 @@ if __name__ == "__main__":
     print(type(symbols_list))
 
     # Fetch stock data
-    #stock_data = fetch_yfinance_data(symbols_list, default_batch_size)
+    stock_data = fetch_yfinance_data(symbols_list)
     
-    #rint("> Saving the data as pickle file...")
-    #stock_data.to_pickle("stock_data.pkl")
+    print("> Saving the data as pickle file...")
+    stock_data.to_pickle("stock_data.pkl")
 
-    print("> Loading the data from pickle file...")
-    stock_data = pd.read_pickle("stock_data.pkl")
+    #print("> Loading the data from pickle file...")
+    #stock_data = pd.read_pickle("stock_data.pkl")
 
     print(stock_data.info())
     print(stock_data.head())
