@@ -2,8 +2,16 @@ import time
 import sqlite3
 import pandas as pd
 import os
-from utils import fetch_yfinance_data, fetch_us_symbols, fetch_sp500_symbols, add_performance_and_cdpp, add_technical_indicators, save_to_sqlite  
 import numpy as np
+# FetchRawStocks.py
+from utils import (
+    fetch_yfinance_data_no_retry,
+    fetch_us_symbols,
+    fetch_sp500_symbols,
+    add_performance_and_cdpp,
+    add_technical_indicators,
+    save_to_sqlite
+)
 
 
 
@@ -25,23 +33,17 @@ if __name__ == "__main__":
     us_df = fetch_us_symbols(FINNHUB_API_KEY)
     print(us_df.shape)  
 
-    print("> Fetching stock data...")   
-    symbols_list = us_df['Symbol'].tolist()[:1000]  # Fetching first 1000 for testing
 
-    # Fetch stock data with optimized batch fetching
-    stock_data = fetch_yfinance_data(symbols_list, batch_size=500, max_workers=10)
+    # Inside FetchRawStocks.py
+    symbols_list = us_df['Symbol'].tolist()[:10]
 
-    # Add technical indicators & performance calculations
+    fetch_yfinance_data_no_retry(
+        symbols_list=symbols_list,
+        batch_size=10,      # or even 1
+        sleep_per_batch=60, # 60 seconds (or more) after each batch
+        table_name="stock_data"
+    )
 
-    print("> Adding technical indicators and performance calculations...")
-    stock_data = add_performance_and_cdpp(stock_data)
-    stock_data = add_technical_indicators(stock_data)
 
-    # Save raw data as Parquet (faster than pickle)
-    stock_data.to_parquet("stock_data.parquet", compression='snappy')
 
-    # Save to SQLite using incremental updates
-    save_to_sqlite(stock_data, "stock_data")
-
-    print("Data saved successfully.")
     print(f"Total execution time: {time.time() - start_time:.2f} seconds")

@@ -1,274 +1,204 @@
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
-import os
 import time
 import logging
 import numpy as np
-import logging
-import concurrent.futures
 import sqlite3
+import requests
+import concurrent.futures
 
-
-DB_NAME = "stocks2.db"
-
-# Configure logging
+DB_NAME = "stocks_no_retry.db"  # rename DB if you want
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-def fetch_yfinance_data222(symbols_list, batch_size=500, max_retries=3):
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=50)
-    
-    data = {}
-    failed_symbols = []
-    
-    for i in range(0, len(symbols_list), batch_size):
-        batch_symbols = symbols_list[i:i + batch_size]
-        retries = 0
-        success = False
-        
-        while retries < max_retries and not success:
-            try:
-                tickers = yf.download(batch_symbols, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'))
-                for symbol in batch_symbols:
-                    if symbol in tickers.columns.levels[1]:
-                        data[symbol] = tickers.xs(symbol, level=1, axis=1)
-                    else:
-                        failed_symbols.append(symbol)
-                success = True
-            except Exception as e:
-                logging.error(f"Error fetching data for batch {batch_symbols}: {e}")
-                retries += 1
-                time.sleep(5)  # Sleep before retrying
-        
-        # Sleep for 10 seconds to avoid hitting API rate limits
-        time.sleep(10)
-    
-    if not data:
-        logging.warning("No data fetched.")
-        return pd.DataFrame()
-    
-    # Concatenate all dataframes
-    df = pd.concat(data.values(), keys=data.keys(), axis=1)
-    
-    # Flatten the multi-index DataFrame
-    df = df.stack(level=0).reset_index()
-    df.columns = ['Date', 'Ticker'] + list(df.columns[2:])
-    
-    if failed_symbols:
-        logging.warning(f"Failed to fetch data for the following symbols: {failed_symbols}")
-    
-    return df
-
-
-
-
-
-
-
-
-
-
-# Fetch all US symbols from Finnhub and save them to a DataFrame
 def fetch_us_symbols(api_key):
-    import requests
+    """
+    Fetch all US symbols from Finnhub and return as a DataFrame with one column 'Symbol'.
+    """
     url = f"https://finnhub.io/api/v1/stock/symbol?exchange=US&token={api_key}"
     try:
-        response = requests.get(url)
-        response.raise_for_status()
-        symbols_data = response.json()
-
+        resp = requests.get(url)
+        resp.raise_for_status()
+        symbols_data = resp.json()
         if not symbols_data:
-            print("No symbols retrieved from Finnhub.")
+            logging.warning("No symbols retrieved from Finnhub.")
             return pd.DataFrame()
 
-        # Prepare data for DataFrame
         symbols = [item['symbol'] for item in symbols_data]
-        symbols_df = pd.DataFrame(symbols, columns=["Symbol"])
-
-        return symbols_df
+        return pd.DataFrame(symbols, columns=["Symbol"])
 
     except requests.RequestException as e:
-        print(f"Error fetching US symbols from Finnhub: {e}")
+        logging.error(f"Error fetching US symbols from Finnhub: {e}")
         return pd.DataFrame()
 
-
-
-
-
-
-# Fetch S&P 500 symbols and save them to a DataFrame
 def fetch_sp500_symbols():
-    """Fetch all S&P 500 symbols and save them to a DataFrame."""
+    """
+    Fetch S&P 500 symbols from Wikipedia and return as a DataFrame with one column 'Symbol'.
+    """
     try:
         sp500_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
         sp500_table = pd.read_html(sp500_url, header=0)
-        sp500_df = sp500_table[0]
-        sp500_symbols = sp500_df["Symbol"].tolist()
-
-        # Save symbols to a DataFrame
-        sp500_df = pd.DataFrame(sp500_symbols, columns=["Symbol"])
-
-        return sp500_df
+        df = sp500_table[0]
+        symbols = df["Symbol"].tolist()
+        return pd.DataFrame(symbols, columns=["Symbol"])
     except Exception as e:
-        print(f"Error fetching S&P 500 symbols: {e}")
+        logging.error(f"Error fetching S&P 500 symbols: {e}")
         return pd.DataFrame()
-    
 
+def save_to_sqlite(df, table_name, db_name=DB_NAME, chunksize=500):
+    """Append DataFrame rows to a SQLite table, creating the table if needed."""
+    if df.empty:
+        logging.warning(f"No data to save to table {table_name}. Skipping.")
+        return
 
+    conn = sqlite3.connect(db_name)
+    try:
+        df.to_sql(table_name, conn, if_exists='append', index=False, chunksize=chunksize)
+        logging.info(f"Saved {len(df)} rows to table '{table_name}'.")
+    except Exception as e:
+        logging.error(f"Error saving to table {table_name}: {e}")
+    finally:
+        conn.close()
+
+def add_performance_and_cdpp(df):
+    """
+    Adds Performance (% change from Open to Close) and
+    consecutive days of >1% performance (cdpp).
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+    df['Performance'] = ((df['Close'] - df['Open']) / df['Open']) * 100
+    df.sort_values(by=['Ticker', 'Date'], inplace=True)
+
+    # Consecutive days with Performance > 1%
+    cdpp_series = (
+        df.groupby('Ticker')['Performance']
+          .apply(lambda x: (x > 1).astype(int).groupby((x <= 1).cumsum()).cumsum())
+          .reset_index(drop=True)
+    )
+    df['cdpp'] = cdpp_series
+    return df
+
+def add_technical_indicators(df):
+    """
+    Adds technical indicators: SMA, EMA, RSI, MACD, Bollinger.
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+    df.sort_values(by=['Ticker', 'Date'], inplace=True)
+
+    # 1) Moving Averages
+    df['SMA5'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(5).mean())
+    df['SMA10'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(10).mean())
+    df['SMA20'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(20).mean())
+
+    df['EMA5'] = df.groupby('Ticker')['Close'].transform(lambda x: x.ewm(span=5, adjust=False).mean())
+    df['EMA10'] = df.groupby('Ticker')['Close'].transform(lambda x: x.ewm(span=10, adjust=False).mean())
+    df['EMA20'] = df.groupby('Ticker')['Close'].transform(lambda x: x.ewm(span=20, adjust=False).mean())
+
+    # 2) RSI
+    delta = df.groupby('Ticker')['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+
+    # 3) MACD
+    df['MACD'] = df.groupby('Ticker')['Close'].transform(
+        lambda x: x.ewm(span=12, adjust=False).mean() - x.ewm(span=26, adjust=False).mean()
+    )
+    df['MACD Signal'] = df.groupby('Ticker')['MACD'].transform(
+        lambda x: x.ewm(span=9, adjust=False).mean()
+    )
+
+    # 4) Bollinger Bands (20 day)
+    df['BB Middle'] = df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(20).mean())
+    df['BB Upper'] = df['BB Middle'] + 2 * df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(20).std())
+    df['BB Lower'] = df['BB Middle'] - 2 * df.groupby('Ticker')['Close'].transform(lambda x: x.rolling(20).std())
+
+    # Fill leading NaNs
+    df.bfill(inplace=True)
+    return df
 
 def fetch_yfinance_batch(batch_symbols, start_date, end_date):
     """
-    Fetches a batch of symbols from Yahoo Finance.
+    Download a batch of symbols via yfinance. If rate-limited or error, return None.
+    threads=False -> reduce concurrency so fewer connections in parallel.
     """
     try:
-        tickers = yf.download(batch_symbols, start=start_date, end=end_date, threads=True)
+        # We'll set threads=False to avoid the "Connection pool is full" warnings as much as possible.
+        tickers = yf.download(
+            tickers=batch_symbols,
+            start=start_date,
+            end=end_date,
+            threads=False
+        )
+        if tickers is None or tickers.empty:
+            logging.warning(f"Empty data returned for batch: {batch_symbols}")
+            return None
         return tickers
     except Exception as e:
         logging.error(f"Error fetching batch {batch_symbols}: {e}")
         return None
 
-
-
-
-def fetch_yfinance_data(symbols_list, batch_size=500, max_workers=10, max_retries=3):
+def fetch_yfinance_data_no_retry(symbols_list,
+                                 batch_size=50,
+                                 sleep_per_batch=15,
+                                 table_name="stock_data"):
     """
-    Fetch stock data from Yahoo Finance efficiently with parallel processing.
+    Single-pass (NO RETRY) fetching of data from yfinance.  
+    - Splits symbols into batches of 'batch_size'.
+    - For each batch, if fetch fails, we skip it; no retries.
+    - Sleep 'sleep_per_batch' seconds after each batch to avoid rate-limiting.
+    - Saves partial data to SQLite as soon as it's fetched.
+
+    :param symbols_list: list of ticker symbols
+    :param batch_size: number of symbols per batch
+    :param sleep_per_batch: time to sleep after each batch
+    :param table_name: name of the table to save
     """
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
 
-    data = {}
-    failed_symbols = set(symbols_list)  # Keep track of failed symbols
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_symbols = {}
-
+    logging.info(f"Beginning single-pass fetch for {len(symbols_list)} symbols.")
+    # We'll do a single-thread approach to minimize parallel connections.
+    # If you want to fetch multiple batches in parallel, you could use max_workers=2 or so.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         for i in range(0, len(symbols_list), batch_size):
-            batch_symbols = symbols_list[i:i + batch_size]
-            future = executor.submit(fetch_yfinance_batch, batch_symbols, start_date, end_date)
-            future_to_symbols[future] = batch_symbols
+            batch_syms = symbols_list[i:i + batch_size]
+            future = executor.submit(fetch_yfinance_batch, batch_syms, start_date, end_date)
+            tickers_df = future.result()  # run in single thread
 
-        for future in concurrent.futures.as_completed(future_to_symbols):
-            batch_symbols = future_to_symbols[future]
-            try:
-                tickers = future.result()
-                if tickers is not None:
-                    for symbol in batch_symbols:
-                        if symbol in tickers.columns.levels[1]:
-                            data[symbol] = tickers.xs(symbol, level=1, axis=1)
-                            failed_symbols.discard(symbol)  # Remove successful fetches
-            except Exception as e:
-                logging.error(f"Error processing batch {batch_symbols}: {e}")
+            if tickers_df is None:
+                # If the batch fails or is empty, skip it
+                logging.warning(f"Skipping failed batch: {batch_syms}")
+            else:
+                # Convert multi-index columns -> normal columns
+                df = tickers_df.stack(level=1).reset_index()
+                df.rename(columns={'level_1': 'Ticker', 'level_0': 'Date'}, inplace=True)
 
-    if not data:
-        logging.warning("No data fetched.")
-        return pd.DataFrame()
+                # Let's rename columns to ensure consistency
+                df.rename(columns={
+                    'Open': 'Open',
+                    'High': 'High',
+                    'Low': 'Low',
+                    'Close': 'Close',
+                    'Adj Close': 'AdjClose',
+                    'Volume': 'Volume'
+                }, inplace=True)
 
-    df = pd.concat(data.values(), keys=data.keys(), axis=1)
+                # Add performance and technical indicators
+                df = add_performance_and_cdpp(df)
+                df = add_technical_indicators(df)
 
-    # Flatten the multi-index DataFrame
-    # df = df.stack(level=0).reset_index()
+                # Save partial success for this batch
+                save_to_sqlite(df, table_name=table_name, db_name=DB_NAME)
 
-    df = df.stack(level=0, future_stack=True).reset_index()
+            # Sleep to reduce rate-limit hits
+            time.sleep(sleep_per_batch)
 
-
-    df.columns = ['Date', 'Ticker'] + list(df.columns[2:])
-
-    if failed_symbols:
-        logging.warning(f"Failed symbols: {list(failed_symbols)}")
-
-    return df
-
-
-
-
-
-
-def add_performance_and_cdpp(stock_data):
-    """
-    Adds Performance and Consecutive Days of Positive Performance (cdpp) indicators efficiently.
-    """
-    stock_data = stock_data.copy()  # Ensure it's a copy to prevent modifying the original DataFrame
-
-    stock_data['Performance'] = ((stock_data['Close'] - stock_data['Open']) / stock_data['Open']) * 100
-
-    # Sort data properly
-    stock_data = stock_data.sort_values(by=['Ticker', 'Date']).reset_index(drop=True)
-
-    # Compute cdpp using vectorized approach
-    cdpp_series = (
-        stock_data.groupby('Ticker')['Performance']
-        .apply(lambda x: (x > 1).astype(int).groupby((x <= 1).cumsum()).cumsum())
-        .reset_index(drop=True)
-    )
-
-    # Ensure indexes match before assignment
-    stock_data['cdpp'] = cdpp_series
-
-    return stock_data
-
-
-
-
-
-
-
-def add_technical_indicators(stock_data):
-    """
-    Adds key technical indicators: SMA, EMA, RSI, MACD, Bollinger Bands, Alpha, Beta, and Sharpe Ratio.
-    """
-    stock_data = stock_data.copy()
-
-    # Ensure data is sorted correctly
-    stock_data = stock_data.sort_values(by=['Ticker', 'Date']).reset_index(drop=True)
-
-    # Moving Averages
-    stock_data['SMA5'] = stock_data.groupby('Ticker')['Close'].transform(lambda x: x.rolling(5).mean())
-    stock_data['SMA10'] = stock_data.groupby('Ticker')['Close'].transform(lambda x: x.rolling(10).mean())
-    stock_data['SMA20'] = stock_data.groupby('Ticker')['Close'].transform(lambda x: x.rolling(20).mean())
-
-    stock_data['EMA5'] = stock_data.groupby('Ticker')['Close'].transform(lambda x: x.ewm(span=5, adjust=False).mean())
-    stock_data['EMA10'] = stock_data.groupby('Ticker')['Close'].transform(lambda x: x.ewm(span=10, adjust=False).mean())
-    stock_data['EMA20'] = stock_data.groupby('Ticker')['Close'].transform(lambda x: x.ewm(span=20, adjust=False).mean())
-
-    # RSI Calculation
-    delta = stock_data.groupby('Ticker')['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss
-    stock_data['RSI'] = 100 - (100 / (1 + rs))
-
-    # MACD Calculation
-    stock_data['MACD'] = stock_data.groupby('Ticker')['Close'].transform(lambda x: x.ewm(span=12, adjust=False).mean() - x.ewm(span=26, adjust=False).mean())
-    stock_data['MACD Signal'] = stock_data.groupby('Ticker')['MACD'].transform(lambda x: x.ewm(span=9, adjust=False).mean())
-
-    # Bollinger Bands
-    stock_data['BB Middle'] = stock_data.groupby('Ticker')['Close'].transform(lambda x: x.rolling(20).mean())
-    stock_data['BB Upper'] = stock_data['BB Middle'] + 2 * stock_data.groupby('Ticker')['Close'].transform(lambda x: x.rolling(20).std())
-    stock_data['BB Lower'] = stock_data['BB Middle'] - 2 * stock_data.groupby('Ticker')['Close'].transform(lambda x: x.rolling(20).std())
-
-    # Fix FutureWarning: Replace `fillna(method="bfill")` with `.bfill()`
-    stock_data.bfill(inplace=True)
-
-    return stock_data
-
-
-
-
-
-
-
-def save_to_sqlite(df, table_name, db_name="stocks2.db", chunksize=500):
-    """
-    Efficiently saves a DataFrame to SQLite, ensuring schema consistency.
-    """
-    import sqlite3  # Ensure sqlite3 is available
-
-    conn = sqlite3.connect(db_name)
-
-    # Drop table if schema mismatch happens (optional)
-    df.to_sql(table_name, conn, if_exists='replace', index=False, chunksize=chunksize)
-
-    conn.close()
+    logging.info("Single-pass fetch completed (no retries).")
