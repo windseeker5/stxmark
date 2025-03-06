@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
 
     # Inside FetchRawStocks.py
-    symbols_list = us_df['Symbol'].tolist()[:10]
+    symbols_list = us_df['Symbol'].tolist()[:100]
 
     fetch_yfinance_data_no_retry(
         symbols_list=symbols_list,
